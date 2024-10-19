@@ -20,54 +20,20 @@ LaTex Resume link: https://github.com/arshwaraich/Resume/blob/master/LaTeX/resum
 ## Usage
 
 ```bash
-# Basic curl request
+# Download PDF directly
 curl -X POST \
   http://localhost:8000/generate-resume \
   -H "Content-Type: application/json" \
   -d '{
-    "job_url": "https://www.example.com/job-posting",
-    "github_token": "ghp_your_github_personal_access_token",
-    "github_repo": "username/resume-repo",
-    "latex_path": "resume.tex",
-    "ollama_host": "http://localhost:11434"
+    "job_url": "https://job-boards.greenhouse.io/faire/jobs/7585808002?gh_jid=7585808002"
+  }' \
+  --output resume.pdf
+
+# Get only the summary text
+curl -X POST \
+  http://localhost:8000/generate-summary \
+  -H "Content-Type: application/json" \
+  -d '{
+    "job_url": "https://job-boards.greenhouse.io/faire/jobs/7585808002?gh_jid=7585808002"
   }'
-
-# Save response to file (includes both summary text and PDF)
-curl -X POST \
-  http://localhost:8000/generate-resume \
-  -H "Content-Type: application/json" \
-  -d '{
-    "job_url": "https://www.example.com/job-posting",
-    "github_token": "ghp_your_github_personal_access_token",
-    "github_repo": "username/resume-repo",
-    "latex_path": "resume.tex",
-    "ollama_host": "http://localhost:11434"
-  }' \
-  -o response.json
-
-# Extract and save just the PDF from the response
-curl -X POST \
-  http://localhost:8000/generate-resume \
-  -H "Content-Type: application/json" \
-  -d '{
-    "job_url": "https://www.example.com/job-posting",
-    "github_token": "ghp_your_github_personal_access_token",
-    "github_repo": "username/resume-repo",
-    "latex_path": "resume.tex",
-    "ollama_host": "http://localhost:11434"
-  }' \
-  | jq -r .pdf_base64 | base64 -d > resume.pdf
-
-# Extract and save just the summary text
-curl -X POST \
-  http://localhost:8000/generate-resume \
-  -H "Content-Type: application/json" \
-  -d '{
-    "job_url": "https://www.example.com/job-posting",
-    "github_token": "ghp_your_github_personal_access_token",
-    "github_repo": "username/resume-repo",
-    "latex_path": "resume.tex",
-    "ollama_host": "http://localhost:11434"
-  }' \
-  | jq -r .summary_text > summary.txt
 ```

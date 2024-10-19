@@ -3,10 +3,6 @@ from pydantic import BaseModel
 import requests
 import os
 import subprocess
-import base64
-from typing import Optional
-import json
-from github import Github
 import tempfile
 from fastapi.responses import FileResponse, JSONResponse
 from bs4 import BeautifulSoup
@@ -16,9 +12,7 @@ app = FastAPI()
 
 class JobRequest(BaseModel):
     job_url: str
-    github_token: str
-    github_repo: str
-    latex_path: str
+    url: str = "https://raw.githubusercontent.com/arshwaraich/Resume/refs/heads/master/LaTeX/resumeTemplate.tex"
     ollama_host: str = "http://localhost:11434"  # Default Ollama host
 
 class ResumeResponse(BaseModel):
@@ -42,14 +36,12 @@ def parse_job_posting(url: str) -> str:
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Failed to parse job posting: {str(e)}")
 
-def get_latex_resume(github_token: str, repo: str, path: str) -> str:
-    """Pull LaTeX resume from Github."""
+def read_github_raw_file(url):
     try:
-        g = Github(github_token)
-        repo = g.get_repo(repo)
-        file_content = repo.get_contents(path)
-        return base64.b64decode(file_content.content).decode('utf-8')
-    except Exception as e:
+        response = requests.get(url)
+        response.raise_for_status()  # Raise an error for bad responses
+        return response.text
+    except requests.exceptions.RequestException as e:
         raise HTTPException(status_code=400, detail=f"Failed to fetch resume from Github: {str(e)}")
 
 def generate_summary(resume_text: str, job_description: str, ollama_host: str) -> str:
@@ -73,6 +65,14 @@ def generate_summary(resume_text: str, job_description: str, ollama_host: str) -
         and skills for this specific job posting. The summary should be 3-4 sentences long and 
         focus on matching qualifications with job requirements. Make it impactful and specific.
         
+        Instructions:
+        1. Focus on matching qualifications with job requirements
+        2. Write 3-4 sentences maximum
+        3. Output ONLY the summary text
+        4. Do not include any prefixes like "Summary:" or "Here's a summary:"
+        5. Do not include any explanations or additional text
+        6. Do not use quotation marks
+
         Summary:
         """
         
@@ -161,11 +161,8 @@ async def generate_resume(request: JobRequest):
         job_description = parse_job_posting(request.job_url)
         
         # 2. Get LaTeX resume template
-        latex_template = get_latex_resume(
-            request.github_token,
-            request.github_repo,
-            request.latex_path
-        )
+        latex_template = read_github_raw_file(request.url)
+
         
         # 3. Generate summary
         summary = generate_summary(latex_template, job_description, request.ollama_host)
@@ -198,11 +195,7 @@ async def generate_summary_only(request: JobRequest):
     """Generate and return only the summary text."""
     try:
         job_description = parse_job_posting(request.job_url)
-        latex_template = get_latex_resume(
-            request.github_token,
-            request.github_repo,
-            request.latex_path
-        )
+        latex_template = read_github_raw_file(request.url)
         summary = generate_summary(latex_template, job_description, request.ollama_host)
         return {"summary": summary}
     except Exception as e:
