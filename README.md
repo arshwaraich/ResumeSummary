@@ -1,5 +1,5 @@
 # ResumeSummary
- An api to write resume summary based on resume data and job description
+ An api to write resume summary based on resume data and job description, using llama3.1 API
 
 ## Requirements:
 
