@@ -3,12 +3,14 @@ from pydantic import BaseModel
 import requests
 import os
 import subprocess
-from bs4 import BeautifulSoup
 import base64
 from typing import Optional
 import json
 from github import Github
 import tempfile
+from fastapi.responses import FileResponse, JSONResponse
+from bs4 import BeautifulSoup
+from pathlib import Path
 
 app = FastAPI()
 
@@ -75,7 +77,7 @@ def generate_summary(resume_text: str, job_description: str, ollama_host: str) -
         """
         
         data = {
-            "model": "llama2:3.1",  # Using Llama 3.1 model
+            "model": "llama3.1",  # Using Llama 3.1 model
             "prompt": prompt,
             "stream": False,
             "temperature": 0.7,
@@ -100,12 +102,33 @@ def generate_summary(resume_text: str, job_description: str, ollama_host: str) -
 
 def update_latex_template(template: str, summary: str) -> str:
     """Insert generated summary into LaTeX template."""
-    # Assuming template has a placeholder like %SUMMARY%
-    return template.replace("%SUMMARY%", summary)
+    # Assuming template has a placeholder like SUMMARYPLACEHOLDER
+    return template.replace("SUMMARYPLACEHOLDER", summary)
 
-def generate_pdf(latex_content: str) -> str:
-    """Generate PDF from LaTeX content and return as base64 string."""
+# Create a temporary directory to store PDFs
+TEMP_DIR = Path("temp_pdfs")
+TEMP_DIR.mkdir(exist_ok=True)
+
+def cleanup_old_files():
+    """Remove PDF files older than 1 hour"""
+    import time
+    current_time = time.time()
+    for pdf_file in TEMP_DIR.glob("*.pdf"):
+        if current_time - pdf_file.stat().st_mtime > 3600:  # 1 hour
+            pdf_file.unlink()
+
+# [Previous functions remain the same until generate_pdf]
+
+def generate_pdf(latex_content: str) -> Path:
+    """Generate PDF from LaTeX content and return the file path."""
     try:
+        cleanup_old_files()  # Cleanup old files
+        
+        # Create a unique filename
+        import uuid
+        pdf_filename = f"resume_{uuid.uuid4()}.pdf"
+        pdf_path = TEMP_DIR / pdf_filename
+        
         with tempfile.TemporaryDirectory() as temp_dir:
             # Write LaTeX content to temporary file
             tex_path = os.path.join(temp_dir, "resume.tex")
@@ -121,18 +144,18 @@ def generate_pdf(latex_content: str) -> str:
                     check=True
                 )
             
-            # Read and encode PDF
-            pdf_path = os.path.join(temp_dir, "resume.pdf")
-            with open(pdf_path, 'rb') as f:
-                pdf_content = f.read()
+            # Copy the generated PDF to our temp directory
+            temp_pdf_path = os.path.join(temp_dir, "resume.pdf")
+            import shutil
+            shutil.copy2(temp_pdf_path, pdf_path)
             
-            return base64.b64encode(pdf_content).decode('utf-8')
+        return pdf_path
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to generate PDF: {str(e)}")
 
-@app.post("/generate-resume", response_model=ResumeResponse)
+@app.post("/generate-resume")
 async def generate_resume(request: JobRequest):
-    """Main endpoint to generate resume summary and PDF."""
+    """Generate resume and return PDF file."""
     try:
         # 1. Parse job posting
         job_description = parse_job_posting(request.job_url)
@@ -150,17 +173,50 @@ async def generate_resume(request: JobRequest):
         # 4. Update template with new summary
         updated_latex = update_latex_template(latex_template, summary)
         
-        # 5. Generate PDF
-        pdf_base64 = generate_pdf(updated_latex)
+        # 5. Generate PDF and get file path
+        pdf_path = generate_pdf(updated_latex)
         
-        return ResumeResponse(
-            pdf_base64=pdf_base64,
-            summary_text=summary
+        # 6. Return the PDF file
+        return FileResponse(
+            path=pdf_path,
+            filename="resume.pdf",
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition": "attachment; filename=resume.pdf"
+            }
         )
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        return JSONResponse(
+            status_code=500,
+            content={"error": str(e)}
+        )
+
+# Add an endpoint to get just the summary text
+@app.post("/generate-summary")
+async def generate_summary_only(request: JobRequest):
+    """Generate and return only the summary text."""
+    try:
+        job_description = parse_job_posting(request.job_url)
+        latex_template = get_latex_resume(
+            request.github_token,
+            request.github_repo,
+            request.latex_path
+        )
+        summary = generate_summary(latex_template, job_description, request.ollama_host)
+        return {"summary": summary}
+    except Exception as e:
+        return JSONResponse(
+            status_code=500,
+            content={"error": str(e)}
+        )
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Cleanup temporary files when shutting down."""
+    import shutil
+    shutil.rmtree(TEMP_DIR, ignore_errors=True)
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="localhost", port=8000)
